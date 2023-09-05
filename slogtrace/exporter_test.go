@@ -16,8 +16,8 @@ import (
 	"time"
 )
 
-func initLogProvider() (func(context.Context) error, error) {
-	traceExporter, err := slogtrace.New()
+func initLogProvider(filter attribute.Filter) (func(context.Context) error, error) {
+	traceExporter, err := slogtrace.New(filter)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +56,7 @@ func TestLogLevels(t *testing.T) {
 	slog.SetDefault(slog.New(h))
 
 	// initialize tracer
-	shutdown, err := initLogProvider()
+	shutdown, err := initLogProvider(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestAttributesAreCorrectlyFormatted(t *testing.T) {
 	slog.SetDefault(slog.New(h))
 
 	// initialize tracer
-	shutdown, err := initLogProvider()
+	shutdown, err := initLogProvider(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func TestEventsAreEmitted(t *testing.T) {
 	slog.SetDefault(slog.New(h))
 
 	// initialize tracer
-	shutdown, err := initLogProvider()
+	shutdown, err := initLogProvider(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +223,7 @@ func TestMultipleSpanAreOrderedByTime(t *testing.T) {
 	slog.SetDefault(slog.New(h))
 
 	// initialize tracer
-	shutdown, err := initLogProvider()
+	shutdown, err := initLogProvider(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,5 +259,55 @@ func TestMultipleSpanAreOrderedByTime(t *testing.T) {
 	}
 	if logLines[1]["msg"] != "test2" {
 		t.Errorf("expected msg to be test2 for second log, got %v", logLines[1]["msg"])
+	}
+}
+
+func TestAttributesAreFiltered(t *testing.T) {
+	// setup slog to output JSON data
+	buf := bytes.Buffer{}
+	w := bufio.NewWriter(&buf)
+	h := slog.NewJSONHandler(w, &slog.HandlerOptions{Level: slog.LevelInfo})
+	slog.SetDefault(slog.New(h))
+
+	// initialize tracer
+	shutdown, err := initLogProvider(func(kv attribute.KeyValue) bool {
+		return kv.Key == "string"
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = shutdown(context.Background())
+	}()
+
+	// emit a trace
+	tracer := otel.Tracer("test")
+	_, span := tracer.Start(context.Background(), "test", trace.WithSpanKind(trace.SpanKindInternal),
+		trace.WithAttributes(
+			attribute.String("string", "hello world"),
+			attribute.String("string2", "hello world 2")))
+	span.End()
+
+	// flush the buffer
+	time.Sleep(200 * time.Millisecond)
+	_ = w.Flush()
+
+	// check the output
+	logLines, err := parseLogLines(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(logLines) != 1 {
+		t.Fatalf("expected 1 log line, got %d", len(logLines))
+	}
+
+	data := logLines[0]
+
+	if data["string"] != "hello world" {
+		t.Errorf("expected string to be hello world, got %v", data["string"])
+	}
+	if data["string2"] != nil {
+		t.Errorf("expected string2 to be filtered, got %v", data["string2"])
 	}
 }

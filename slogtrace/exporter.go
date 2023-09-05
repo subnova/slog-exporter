@@ -14,10 +14,13 @@ import (
 type Exporter struct {
 	stoppedMu sync.RWMutex
 	stopped   bool
+	filter    attribute.Filter
 }
 
-func New() (*Exporter, error) {
-	return &Exporter{}, nil
+func New(filter attribute.Filter) (*Exporter, error) {
+	return &Exporter{
+		filter: filter,
+	}, nil
 }
 
 func (e *Exporter) ExportSpans(ctx context.Context, spans []trace.ReadOnlySpan) error {
@@ -45,7 +48,7 @@ func (e *Exporter) ExportSpans(ctx context.Context, spans []trace.ReadOnlySpan) 
 
 		var attrs []slog.Attr
 		attrs = append(attrs, slog.String("duration", duration.String()))
-		attrs = append(attrs, attributesToAttrs(span.Attributes())...)
+		attrs = append(attrs, attributesToAttrs(e.filter, span.Attributes())...)
 
 		record.AddAttrs(attrs...)
 
@@ -53,7 +56,7 @@ func (e *Exporter) ExportSpans(ctx context.Context, spans []trace.ReadOnlySpan) 
 
 		for _, event := range span.Events() {
 			eventRecord := slog.NewRecord(event.Time, level, event.Name, 0)
-			eventRecord.AddAttrs(attributesToAttrs(event.Attributes)...)
+			eventRecord.AddAttrs(attributesToAttrs(e.filter, event.Attributes)...)
 
 			records = append(records, eventRecord)
 		}
@@ -79,11 +82,15 @@ func (e *Exporter) ExportSpans(ctx context.Context, spans []trace.ReadOnlySpan) 
 	return nil
 }
 
-func attributesToAttrs(attributes []attribute.KeyValue) []slog.Attr {
+func attributesToAttrs(filter attribute.Filter, attributes []attribute.KeyValue) []slog.Attr {
 	var attrs []slog.Attr
 
 	for _, attr := range attributes {
 		key := string(attr.Key)
+
+		if filter != nil && !filter(attr) {
+			continue
+		}
 
 		switch attr.Value.Type() {
 		case attribute.BOOL:
