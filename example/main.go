@@ -12,8 +12,12 @@ import (
 	"time"
 )
 
+func attributeFilter(kv attribute.KeyValue) bool {
+	return kv.Key != "filter.me"
+}
+
 func initLogProvider() (func(context.Context) error, error) {
-	traceExporter, err := slogtrace.New()
+	traceExporter, err := slogtrace.New(attributeFilter)
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +46,8 @@ func main() {
 
 	ctx, span := tracer.Start(context.Background(), "example", trace.WithSpanKind(trace.SpanKindInternal),
 		trace.WithAttributes(
-			attribute.String("example.key", "example.value")))
+			attribute.String("example.key", "example.value"),
+			attribute.String("filter.me", "filter.me.value")))
 	span.AddEvent("example event", trace.WithAttributes(attribute.Int("example.event.key", 1)))
 	defer span.End()
 
